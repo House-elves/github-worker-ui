@@ -529,6 +529,51 @@ td a:hover { text-decoration: underline; }
 
 .config-val input.secret { color: var(--text-2); }
 
+.config-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+}
+
+.config-toggle-track {
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--bg-4);
+  border: 1px solid var(--border);
+  position: relative;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.config-toggle-track.on {
+  background: var(--green-subtle);
+  border-color: var(--green);
+}
+
+.config-toggle-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-2);
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.config-toggle-track.on .config-toggle-thumb {
+  transform: translateX(14px);
+  background: var(--green);
+}
+
+.config-toggle-label {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+
 /* === ACTION BUTTONS === */
 .row-actions {
   display: flex;
@@ -844,19 +889,40 @@ function renderConfig(config) {
   empty.style.display = 'none';
   let html = '';
   for (const key of keys) {
+    const val = config[key];
     const isSecret = SECRET_KEYS.has(key);
+    const isBool = val === 'true' || val === 'false';
     html += '<div class="config-row"><div class="config-key">' + key + '</div>';
-    html += '<div class="config-val"><input type="' + (isSecret ? 'password' : 'text') + '"'
-          + ' class="' + (isSecret ? 'secret' : '') + '" data-key="' + key + '"'
-          + ' value="' + esc(config[key]) + '"></div></div>';
+    if (isBool) {
+      const on = val === 'true';
+      html += '<div class="config-val"><div class="config-toggle">'
+            + '<div class="config-toggle-track' + (on ? ' on' : '') + '" data-key="' + key + '" onclick="toggleConfigBool(this)">'
+            + '<div class="config-toggle-thumb"></div></div>'
+            + '<span class="config-toggle-label">' + (on ? 'on' : 'off') + '</span>'
+            + '</div></div>';
+    } else {
+      html += '<div class="config-val"><input type="' + (isSecret ? 'password' : 'text') + '"'
+            + ' class="' + (isSecret ? 'secret' : '') + '" data-key="' + key + '"'
+            + ' value="' + esc(val) + '"></div>';
+    }
+    html += '</div>';
   }
   grid.innerHTML = html;
 }
 
+function toggleConfigBool(track) {
+  const on = track.classList.toggle('on');
+  track.nextElementSibling.textContent = on ? 'on' : 'off';
+}
+
 async function saveConfig() {
-  const inputs = document.querySelectorAll('.config-val input');
   const updates = {};
-  inputs.forEach(inp => { updates[inp.dataset.key] = inp.value; });
+  document.querySelectorAll('.config-val input').forEach(inp => {
+    updates[inp.dataset.key] = inp.value;
+  });
+  document.querySelectorAll('.config-toggle-track').forEach(track => {
+    updates[track.dataset.key] = track.classList.contains('on') ? 'true' : 'false';
+  });
   try {
     const res = await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
     toast(res.ok ? 'Config saved' : 'Save failed', res.ok ? 'success' : 'error');
