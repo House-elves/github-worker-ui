@@ -529,6 +529,36 @@ td a:hover { text-decoration: underline; }
 
 .config-val input.secret { color: var(--text-2); }
 
+/* === ACTION BUTTONS === */
+.row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.row-btn {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+
+.row-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+  border-color: var(--border-bright);
+}
+
+.row-btn.retry:hover { border-color: var(--amber); color: var(--amber); }
+.row-btn.remove:hover { border-color: var(--red); color: var(--red); }
+
 /* === EMPTY STATE === */
 .empty {
   text-align: center;
@@ -608,7 +638,7 @@ td a:hover { text-decoration: underline; }
     </div>
     <div class="panel-body">
       <table>
-        <thead><tr><th>Issue</th><th>Title</th><th>State</th><th>PR</th><th>Updated</th></tr></thead>
+        <thead><tr><th>Issue</th><th>Title</th><th>State</th><th>PR</th><th>Updated</th><th></th></tr></thead>
         <tbody id="issueBody"></tbody>
       </table>
       <div class="empty" id="issueEmpty">
@@ -625,7 +655,7 @@ td a:hover { text-decoration: underline; }
     </div>
     <div class="panel-body">
       <table>
-        <thead><tr><th>PR</th><th>Title</th><th>State</th><th>Updated</th></tr></thead>
+        <thead><tr><th>PR</th><th>Title</th><th>State</th><th>Updated</th><th></th></tr></thead>
         <tbody id="reviewBody"></tbody>
       </table>
       <div class="empty" id="reviewEmpty">
@@ -744,8 +774,12 @@ function renderIssues(issues) {
     html += iss.prUrl
       ? '<td><a href="' + iss.prUrl + '" target="_blank" onclick="event.stopPropagation()">#' + (iss.prNumber || '?') + '</a></td>'
       : '<td style="color:var(--text-2)">—</td>';
-    html += '<td class="time-cell">' + timeAgo(iss.lastUpdated) + '</td></tr>';
-    if (isSel) html += '<tr class="flow-row"><td colspan="5">' + renderFlow(iss.state, ISSUE_STATES) + '</td></tr>';
+    html += '<td class="time-cell">' + timeAgo(iss.lastUpdated) + '</td>';
+    html += '<td><div class="row-actions">'
+          + '<button class="row-btn retry" onclick="event.stopPropagation();retryItem(\'' + key + '\')" title="Retry">↻</button>'
+          + '<button class="row-btn remove" onclick="event.stopPropagation();removeItem(\'' + key + '\')" title="Remove">✕</button>'
+          + '</div></td></tr>';
+    if (isSel) html += '<tr class="flow-row"><td colspan="6">' + renderFlow(iss.state, ISSUE_STATES) + '</td></tr>';
   }
   tbody.innerHTML = html;
 }
@@ -765,7 +799,11 @@ function renderReviews(reviews) {
     html += '<td><a href="' + prUrl(rev.ownerRepo, rev.prNumber) + '" target="_blank">' + key + '</a></td>';
     html += '<td class="title-cell">' + esc(rev.title || '') + '</td>';
     html += '<td><span class="badge ' + badgeClass(rev.state) + '">' + shortState(rev.state) + '</span></td>';
-    html += '<td class="time-cell">' + timeAgo(rev.lastUpdated) + '</td></tr>';
+    html += '<td class="time-cell">' + timeAgo(rev.lastUpdated) + '</td>';
+    html += '<td><div class="row-actions">'
+          + '<button class="row-btn retry" onclick="event.stopPropagation();retryItem(\'' + key + '\')" title="Retry">↻</button>'
+          + '<button class="row-btn remove" onclick="event.stopPropagation();removeItem(\'' + key + '\')" title="Remove">✕</button>'
+          + '</div></td></tr>';
   }
   tbody.innerHTML = html;
 }
@@ -864,6 +902,40 @@ async function runPreview() {
     toast('Preview complete', 'success');
   } catch (e) { toast('Failed: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.textContent = 'preview'; }
+}
+
+// === STATE ACTIONS ===
+function encodeKey(key) {
+  // Convert "owner/repo#123" to "owner_repo#123" for the URL path
+  return key.replace('/', '_');
+}
+
+async function retryItem(key) {
+  try {
+    const res = await fetch('/api/state/' + encodeURIComponent(encodeKey(key)) + '/retry', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      toast('Reset ' + key + ': ' + data.from + ' → ' + data.to, 'success');
+      const stateRes = await fetch('/api/state');
+      updateState(await stateRes.json());
+    } else {
+      toast('Retry failed: ' + (data.error || ''), 'error');
+    }
+  } catch (e) { toast('Retry failed: ' + e.message, 'error'); }
+}
+
+async function removeItem(key) {
+  try {
+    const res = await fetch('/api/state/' + encodeURIComponent(encodeKey(key)), { method: 'DELETE' });
+    const data = await res.json();
+    if (res.ok) {
+      toast('Removed ' + key, 'success');
+      const stateRes = await fetch('/api/state');
+      updateState(await stateRes.json());
+    } else {
+      toast('Remove failed: ' + (data.error || ''), 'error');
+    }
+  } catch (e) { toast('Remove failed: ' + e.message, 'error'); }
 }
 
 // === WEBSOCKET ===
