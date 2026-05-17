@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.attribute.FileTime;
 
+import io.quarkus.logging.Log;
 import io.quarkus.scheduler.Scheduled;
 import io.quarkus.websockets.next.OpenConnections;
 import jakarta.inject.Inject;
@@ -19,7 +20,8 @@ public class StateWatcher {
 
     @Scheduled(every = "5s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void pollState() {
-        if (connections.stream().findAny().isEmpty()) return;
+        long count = connections.stream().count();
+        if (count == 0) return;
 
         try {
             if (!Files.exists(LiveSocket.STATE_PATH)) return;
@@ -27,9 +29,11 @@ public class StateWatcher {
             if (lastModified == null || current.compareTo(lastModified) > 0) {
                 lastModified = current;
                 String state = LiveSocket.readState();
+                Log.infof("State changed, pushing to %d client(s)", count);
                 connections.forEach(c -> c.sendText(state));
             }
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            Log.warnf("Failed to poll state: %s", e.getMessage());
         }
     }
 }

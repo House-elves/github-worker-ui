@@ -460,6 +460,36 @@ td a:hover { text-decoration: underline; }
 
 .flow-arrow.completed { color: var(--green); opacity: 0.45; }
 
+/* === LOG TABS === */
+.log-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  transition: border-color var(--transition);
+}
+
+.log-tab {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 7px 14px;
+  color: var(--text-2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.12s;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+}
+
+.log-tab:hover { color: var(--text-0); }
+
+.log-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
 /* === LOGS === */
 .log-area {
   font-family: var(--mono);
@@ -714,9 +744,13 @@ td a:hover { text-decoration: underline; }
     <div class="panel">
       <div class="panel-head">
         <div class="panel-title"><span class="panel-title-icon">🖥</span> Logs</div>
-        <button class="btn btn-sm" onclick="fetchLogs()">refresh</button>
+        <button class="btn btn-sm" onclick="fetchCurrentLog()">refresh</button>
       </div>
       <div class="panel-body">
+        <div class="log-tabs">
+          <button class="log-tab active" id="tabWorker" onclick="switchLogTab('worker')">Worker</button>
+          <button class="log-tab" id="tabClaude" onclick="switchLogTab('claude')">Claude</button>
+        </div>
         <div class="log-area" id="logArea">Loading logs...</div>
       </div>
     </div>
@@ -930,17 +964,43 @@ async function saveConfig() {
 }
 
 // === LOGS ===
+let currentLogTab = 'worker';
+
+function switchLogTab(tab) {
+  currentLogTab = tab;
+  document.getElementById('tabWorker').className = 'log-tab' + (tab === 'worker' ? ' active' : '');
+  document.getElementById('tabClaude').className = 'log-tab' + (tab === 'claude' ? ' active' : '');
+  fetchCurrentLog();
+}
+
+function fetchCurrentLog() {
+  if (currentLogTab === 'claude') fetchClaudeLogs();
+  else fetchLogs();
+}
+
 async function fetchLogs() {
   try {
     const res = await fetch('/api/logs?lines=100');
     const data = await res.json();
-    const area = document.getElementById('logArea');
-    if (data.logs) {
-      const lines = data.logs.split('\n').filter(Boolean);
-      area.innerHTML = lines.map(l => '<span class="log-line">' + esc(l) + '</span>').join('\n');
-      area.scrollTop = area.scrollHeight;
-    } else { area.textContent = data.error || 'No logs available'; }
+    renderLogArea(data);
   } catch (e) { document.getElementById('logArea').textContent = 'Failed: ' + e.message; }
+}
+
+async function fetchClaudeLogs() {
+  try {
+    const res = await fetch('/api/logs/claude?lines=50');
+    const data = await res.json();
+    renderLogArea(data);
+  } catch (e) { document.getElementById('logArea').textContent = 'Failed: ' + e.message; }
+}
+
+function renderLogArea(data) {
+  const area = document.getElementById('logArea');
+  if (data.logs) {
+    const lines = data.logs.split('\n').filter(Boolean);
+    area.innerHTML = lines.map(l => '<span class="log-line">' + esc(l) + '</span>').join('\n');
+    area.scrollTop = area.scrollHeight;
+  } else { area.textContent = data.error || 'No logs available'; }
 }
 
 // === ACTIONS ===
@@ -961,10 +1021,7 @@ async function runPreview() {
   try {
     const res = await fetch('/api/preview', { method: 'POST' });
     const data = await res.json();
-    const area = document.getElementById('logArea');
-    const lines = (data.output || data.error || '').split('\n').filter(Boolean);
-    area.innerHTML = lines.map(l => '<span class="log-line">' + esc(l) + '</span>').join('\n');
-    area.scrollTop = area.scrollHeight;
+    renderLogArea({ logs: data.output || data.error || '' });
     toast('Preview complete', 'success');
   } catch (e) { toast('Failed: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.textContent = 'preview'; }
