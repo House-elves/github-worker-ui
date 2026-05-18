@@ -58,6 +58,29 @@ public class ActionResource {
     }
 
     @POST
+    @jakarta.ws.rs.Path("/discover")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response discover() {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("github-worker", "--discover");
+            pb.environment().put("PATH", System.getenv("PATH"));
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            boolean finished = process.waitFor(120, TimeUnit.SECONDS);
+            String output;
+            if (finished) {
+                output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            } else {
+                process.destroyForcibly();
+                output = "Discovery timed out after 120 seconds";
+            }
+            return Response.ok(Map.of("output", output)).build();
+        } catch (Exception e) {
+            return Response.serverError().entity(Map.of("error", e.getMessage())).build();
+        }
+    }
+
+    @POST
     @jakarta.ws.rs.Path("/react/{owner}/{repo}/{number}")
     @Produces(MediaType.APPLICATION_JSON)
     public Response addEyesReaction(@PathParam("owner") String owner,

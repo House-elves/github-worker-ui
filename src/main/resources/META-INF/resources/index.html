@@ -799,19 +799,28 @@ td a:hover { text-decoration: underline; }
 </header>
 
 <main class="main">
-  <div class="panel" id="discoveryPanel" style="display:none;">
+  <div class="panel" id="discoveryPanel">
     <div class="panel-head">
       <div class="panel-title"><span class="panel-title-icon">🔍</span> Discover</div>
       <div style="display:flex;align-items:center;gap:8px;">
-        <div class="panel-count" id="discoveryCount">0</div>
-        <button class="panel-collapse" id="discoveryToggle" onclick="toggleDiscovery()">▼</button>
+        <div class="panel-count" id="discoveryCount">—</div>
+        <button class="btn btn-sm" id="discoveryRefresh" onclick="loadDiscovery()" style="display:none;">refresh</button>
+        <button class="panel-collapse" id="discoveryToggle" onclick="toggleDiscovery()">▶</button>
       </div>
     </div>
-    <div class="panel-body" id="discoveryBody">
-      <table>
+    <div class="panel-body collapsed" id="discoveryBody">
+      <div class="empty" id="discoveryLoading" style="display:none;">
+        <div class="empty-icon">⏳</div>
+        Discovering issues by topic...
+      </div>
+      <table id="discoveryTable" style="display:none;">
         <thead><tr><th>Item</th><th>Title</th><th>Type</th><th>Source</th><th></th></tr></thead>
         <tbody id="discoveryTableBody"></tbody>
       </table>
+      <div class="empty" id="discoveryEmpty" style="display:none;">
+        <div class="empty-icon">🔍</div>
+        No items discovered
+      </div>
     </div>
   </div>
 
@@ -1018,21 +1027,31 @@ function updateState(data) {
   currentState = data;
   renderIssues(data.issues || {});
   renderReviews(data.reviews || {});
-  renderDiscoveries(data.discoveries || {});
+  if (discoveryLoaded) renderDiscoveries(data.discoveries || {});
   const hasActive = Object.values(data.issues || {}).some(i => i.state !== 'DONE')
                  || Object.values(data.reviews || {}).some(r => r.state !== 'DONE');
   document.getElementById('statusDot').className = 'status-dot' + (hasActive ? ' online' : '');
 }
 
+let discoveryLoaded = false;
+
 function renderDiscoveries(discoveries) {
-  const panel = document.getElementById('discoveryPanel');
   const tbody = document.getElementById('discoveryTableBody');
   const count = document.getElementById('discoveryCount');
+  const table = document.getElementById('discoveryTable');
+  const empty = document.getElementById('discoveryEmpty');
+  const loading = document.getElementById('discoveryLoading');
   const keys = Object.keys(discoveries);
   count.textContent = keys.length;
+  loading.style.display = 'none';
 
-  if (keys.length === 0) { panel.style.display = 'none'; return; }
-  panel.style.display = '';
+  if (keys.length === 0) {
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  table.style.display = '';
 
   let html = '';
   for (const key of keys) {
@@ -1056,15 +1075,34 @@ function renderDiscoveries(discoveries) {
 function toggleDiscovery() {
   const body = document.getElementById('discoveryBody');
   const toggle = document.getElementById('discoveryToggle');
+  const refresh = document.getElementById('discoveryRefresh');
   const collapsed = body.classList.toggle('collapsed');
   toggle.textContent = collapsed ? '▶' : '▼';
-  localStorage.setItem('discovery-collapsed', collapsed);
+  refresh.style.display = collapsed ? 'none' : '';
+
+  if (!collapsed && !discoveryLoaded) {
+    loadDiscovery();
+  }
 }
 
-// Restore collapse state
-if (localStorage.getItem('discovery-collapsed') === 'true') {
-  document.getElementById('discoveryBody').classList.add('collapsed');
-  document.getElementById('discoveryToggle').textContent = '▶';
+async function loadDiscovery() {
+  const loading = document.getElementById('discoveryLoading');
+  const table = document.getElementById('discoveryTable');
+  const empty = document.getElementById('discoveryEmpty');
+  loading.style.display = 'block';
+  table.style.display = 'none';
+  empty.style.display = 'none';
+
+  try {
+    await fetch('/api/discover', { method: 'POST' });
+    const stateRes = await fetch('/api/state');
+    const data = await stateRes.json();
+    discoveryLoaded = true;
+    renderDiscoveries(data.discoveries || {});
+  } catch (e) {
+    loading.style.display = 'none';
+    toast('Discovery failed: ' + e.message, 'error');
+  }
 }
 
 async function addEyes(ownerRepo, number) {
