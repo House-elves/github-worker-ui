@@ -30,7 +30,7 @@ public class StateWatcher {
                 lastModified = current;
                 String state = LiveSocket.readState();
                 Log.infof("State changed, pushing to %d client(s)", count);
-                connections.forEach(c -> c.sendText(state));
+                connections.forEach(c -> c.sendTextAndAwait(state));
             }
         } catch (IOException e) {
             Log.warnf("Failed to poll state: %s", e.getMessage());

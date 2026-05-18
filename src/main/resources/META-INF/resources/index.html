@@ -1065,7 +1065,12 @@ async function removeItem(key) {
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(proto + '//' + location.host + '/api/live');
-  ws.onmessage = evt => { try { const d = JSON.parse(evt.data); if (!d.error) updateState(d); } catch(e){} };
+  ws.onmessage = evt => {
+    try {
+      const d = JSON.parse(evt.data);
+      if (!d.error) updateState(d);
+    } catch(e) { console.error('WebSocket parse error:', e, evt.data?.substring(0, 200)); }
+  };
   ws.onclose = () => setTimeout(connectWS, 3000);
   ws.onerror = () => ws.close();
 }
