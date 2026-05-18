@@ -249,6 +249,46 @@ body {
   border-color: var(--accent-hover);
 }
 
+/* === ADD ITEM === */
+.add-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.add-input {
+  font-family: var(--r-code-font, var(--mono));
+  font-size: 0.75rem;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-0);
+  color: var(--text-0);
+  width: 280px;
+  outline: none;
+  transition: border-color 0.15s, width 0.2s;
+}
+
+.add-input:focus { border-color: var(--accent); }
+.add-input::placeholder { color: var(--text-2); }
+
+.add-item.collapsed .add-input { display: none; }
+.add-item.collapsed .add-submit { display: none; }
+
+.add-submit {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--green);
+  background: transparent;
+  color: var(--green);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.add-submit:hover { background: var(--green); color: #fff; }
+
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn:disabled:hover { transform: none; }
 
@@ -748,6 +788,12 @@ td a:hover { text-decoration: underline; }
       </div>
       <span class="theme-toggle-label" id="sunIcon">☀️</span>
     </div>
+    <div class="add-item collapsed" id="addItem">
+      <button class="btn" onclick="toggleAddItem()" title="Add issue or PR manually">+</button>
+      <input class="add-input" id="addInput" placeholder="owner/repo#123 or GitHub URL"
+             onkeydown="if(event.key==='Enter')submitAddItem();if(event.key==='Escape')toggleAddItem();">
+      <button class="add-submit" onclick="submitAddItem()">add</button>
+    </div>
     <button class="btn" id="btnPreview" onclick="runPreview()">preview</button>
     <button class="btn primary" id="btnTrigger" onclick="runTrigger()">trigger now</button>
   </div>
@@ -1187,6 +1233,44 @@ async function removeItem(key) {
       toast('Remove failed: ' + (data.error || ''), 'error');
     }
   } catch (e) { toast('Remove failed: ' + e.message, 'error'); }
+}
+
+// === ADD ITEM ===
+function toggleAddItem() {
+  const el = document.getElementById('addItem');
+  const input = document.getElementById('addInput');
+  el.classList.toggle('collapsed');
+  if (!el.classList.contains('collapsed')) {
+    input.focus();
+  } else {
+    input.value = '';
+  }
+}
+
+async function submitAddItem() {
+  const input = document.getElementById('addInput');
+  const val = input.value.trim();
+  if (!val) return;
+  try {
+    const res = await fetch('/api/state/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: val })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (data.status === 'exists') {
+        toast(data.key + ' already tracked', 'success');
+      } else {
+        toast('Added ' + data.key + ' as ' + data.type, 'success');
+        const stateRes = await fetch('/api/state');
+        updateState(await stateRes.json());
+      }
+      toggleAddItem();
+    } else {
+      toast(data.error || 'Failed to add', 'error');
+    }
+  } catch (e) { toast('Failed: ' + e.message, 'error'); }
 }
 
 // === WEBSOCKET ===

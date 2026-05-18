@@ -1,16 +1,21 @@
 package io.quarkus.houseelves.worker;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -128,6 +133,154 @@ public class StateResource {
         } catch (IOException e) {
             return Response.serverError().entity(Map.of("error", e.getMessage())).build();
         }
+    }
+
+    private static final Path CONFIG_PATH = Path.of(System.getProperty("user.home"),
+            ".config", "github-worker", "config");
+
+    // Matches: owner/repo#123, https://github.com/owner/repo/issues/123, https://github.com/owner/repo/pull/123
+    private static final Pattern KEY_PATTERN = Pattern.compile(
+            "(?:https?://github\\.com/)?([^/]+/[^/#]+)(?:/(?:issues|pull)/)?(\\d+)");
+    private static final Pattern HASH_PATTERN = Pattern.compile("([^/]+/[^#]+)#(\\d+)");
+
+    @POST
+    @jakarta.ws.rs.Path("/add")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response addItem(Map<String, String> body) {
+        String input = body.getOrDefault("item", "").trim();
+        if (input.isEmpty()) {
+            return Response.status(400).entity(Map.of("error", "No item provided")).build();
+        }
+
+        String ownerRepo = null;
+        int number = 0;
+
+        // Try URL format first
+        Matcher m = KEY_PATTERN.matcher(input);
+        if (m.find()) {
+            ownerRepo = m.group(1);
+            number = Integer.parseInt(m.group(2));
+        } else {
+            // Try owner/repo#123 format
+            m = HASH_PATTERN.matcher(input);
+            if (m.find()) {
+                ownerRepo = m.group(1);
+                number = Integer.parseInt(m.group(2));
+            }
+        }
+
+        if (ownerRepo == null || number == 0) {
+            return Response.status(400).entity(Map.of("error",
+                    "Could not parse. Use owner/repo#123 or a GitHub URL")).build();
+        }
+
+        String token = readConfigValue("GITHUB_TOKEN");
+        if (token == null) {
+            return Response.serverError().entity(Map.of("error", "GITHUB_TOKEN not configured")).build();
+        }
+
+        // Determine if it's an issue or a PR
+        String type = detectType(ownerRepo, number, token);
+        if (type == null) {
+            return Response.status(404).entity(Map.of("error",
+                    "Could not find " + ownerRepo + "#" + number)).build();
+        }
+
+        String title = fetchTitle(ownerRepo, number, type, token);
+
+        try {
+            ObjectNode root = (ObjectNode) mapper.readTree(Files.readString(STATE_PATH));
+
+            String key = ownerRepo + "#" + number;
+
+            if ("pr".equals(type)) {
+                ObjectNode reviews = root.has("reviews") ? (ObjectNode) root.get("reviews") : mapper.createObjectNode();
+                if (reviews.has(key)) {
+                    return Response.ok(Map.of("status", "exists", "key", key, "type", "review")).build();
+                }
+                ObjectNode entry = mapper.createObjectNode();
+                entry.put("state", "NEW");
+                entry.put("lastUpdated", Instant.now().toString());
+                entry.put("title", title);
+                entry.put("ownerRepo", ownerRepo);
+                entry.put("prNumber", number);
+                reviews.set(key, entry);
+                root.set("reviews", reviews);
+                saveState(root);
+                return Response.ok(Map.of("status", "added", "key", key, "type", "review")).build();
+            } else {
+                ObjectNode issues = root.has("issues") ? (ObjectNode) root.get("issues") : mapper.createObjectNode();
+                if (issues.has(key)) {
+                    return Response.ok(Map.of("status", "exists", "key", key, "type", "issue")).build();
+                }
+                ObjectNode entry = mapper.createObjectNode();
+                entry.put("state", "NEW");
+                entry.put("lastUpdated", Instant.now().toString());
+                entry.put("title", title);
+                entry.put("ownerRepo", ownerRepo);
+                entry.put("issueNumber", number);
+                entry.put("attempts", 0);
+                issues.set(key, entry);
+                root.set("issues", issues);
+                saveState(root);
+                return Response.ok(Map.of("status", "added", "key", key, "type", "issue")).build();
+            }
+        } catch (IOException e) {
+            return Response.serverError().entity(Map.of("error", e.getMessage())).build();
+        }
+    }
+
+    private String detectType(String ownerRepo, int number, String token) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("gh", "api",
+                    "repos/" + ownerRepo + "/pulls/" + number, "--jq", ".number");
+            pb.environment().put("GH_TOKEN", token);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            boolean finished = p.waitFor(10, TimeUnit.SECONDS);
+            if (finished && p.exitValue() == 0) return "pr";
+        } catch (Exception ignored) {}
+
+        try {
+            ProcessBuilder pb = new ProcessBuilder("gh", "api",
+                    "repos/" + ownerRepo + "/issues/" + number, "--jq", ".number");
+            pb.environment().put("GH_TOKEN", token);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            boolean finished = p.waitFor(10, TimeUnit.SECONDS);
+            if (finished && p.exitValue() == 0) return "issue";
+        } catch (Exception ignored) {}
+
+        return null;
+    }
+
+    private String fetchTitle(String ownerRepo, int number, String type, String token) {
+        try {
+            String endpoint = "pr".equals(type)
+                    ? "repos/" + ownerRepo + "/pulls/" + number
+                    : "repos/" + ownerRepo + "/issues/" + number;
+            ProcessBuilder pb = new ProcessBuilder("gh", "api", endpoint, "--jq", ".title");
+            pb.environment().put("GH_TOKEN", token);
+            Process p = pb.start();
+            boolean finished = p.waitFor(10, TimeUnit.SECONDS);
+            if (finished && p.exitValue() == 0) {
+                return new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            }
+        } catch (Exception ignored) {}
+        return ownerRepo + "#" + number;
+    }
+
+    private String readConfigValue(String key) {
+        try {
+            for (String line : Files.readAllLines(CONFIG_PATH)) {
+                line = line.strip();
+                if (line.startsWith(key + "=")) {
+                    return line.substring(key.length() + 1).strip();
+                }
+            }
+        } catch (IOException ignored) {}
+        return null;
     }
 
     private void saveState(JsonNode root) throws IOException {
