@@ -55,6 +55,7 @@ The dev UI is available at http://localhost:7478/q/dev/
 | `/api/logs` | GET | Recent worker logs (systemd journal) |
 | `/api/logs/claude` | GET | Recent Claude agent logs |
 | `/api/trigger` | POST | Trigger a worker run |
+| `/api/preview` | POST | Run worker in preview mode |
 | `/api/discover` | POST | Run on-demand topic discovery |
 | `/api/react/{owner}/{repo}/{number}` | POST | Add 👀 reaction to an issue/PR |
 | `/api/assign/{owner}/{repo}/{number}` | POST | Self-assign an issue |
