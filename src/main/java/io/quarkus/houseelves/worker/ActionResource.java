@@ -19,6 +19,9 @@ public class ActionResource {
     private static final Path CONFIG_PATH = Path.of(System.getProperty("user.home"),
             ".config", "github-worker", "config");
 
+    @jakarta.inject.Inject
+    StateResource stateResource;
+
     @POST
     @jakarta.ws.rs.Path("/trigger")
     @Produces(MediaType.APPLICATION_JSON)
@@ -92,6 +95,7 @@ public class ActionResource {
             return Response.serverError().entity(Map.of("error", "GITHUB_TOKEN not configured")).build();
         }
         try {
+            // Add 👀 reaction
             ProcessBuilder pb = new ProcessBuilder("gh", "api",
                     "repos/" + ownerRepo + "/issues/" + number + "/reactions",
                     "-X", "POST", "-f", "content=eyes");
@@ -99,7 +103,11 @@ public class ActionResource {
             pb.redirectErrorStream(true);
             Process process = pb.start();
             process.waitFor(15, TimeUnit.SECONDS);
-            return Response.ok(Map.of("status", "reacted", "item", ownerRepo + "#" + number)).build();
+
+            // Also add to tracking immediately so the worker picks it up
+            stateResource.addItem(Map.of("item", ownerRepo + "#" + number));
+
+            return Response.ok(Map.of("status", "reacted_and_tracked", "item", ownerRepo + "#" + number)).build();
         } catch (Exception e) {
             return Response.serverError().entity(Map.of("error", e.getMessage())).build();
         }
@@ -124,7 +132,11 @@ public class ActionResource {
             pb.redirectErrorStream(true);
             Process process = pb.start();
             process.waitFor(15, TimeUnit.SECONDS);
-            return Response.ok(Map.of("status", "assigned", "item", ownerRepo + "#" + number)).build();
+
+            // Also add to tracking immediately
+            stateResource.addItem(Map.of("item", ownerRepo + "#" + number));
+
+            return Response.ok(Map.of("status", "assigned_and_tracked", "item", ownerRepo + "#" + number)).build();
         } catch (Exception e) {
             return Response.serverError().entity(Map.of("error", e.getMessage())).build();
         }
